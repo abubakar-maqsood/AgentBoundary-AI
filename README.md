@@ -1,3 +1,16 @@
+## Public showcase + protected admin (new)
+
+- `/` and `/public`: **No-login public demo** with predefined synthetic steps, permission revocation, and ephemeral per-task event timeline.
+- `/admin`: **Password-protected original dashboard**, using `AB_DEMO_USER` and `AB_DEMO_PASSWORD`.
+- `/api/public/*`: restricted fixture-only demo operations. **No AI calls, Docker execution, secrets, persistent audit DB writes, or filesystem access**.
+- `/api/*`: original authenticated routes; keep credentials private.
+
+The public demo does not constitute Vultr deployment or real sandbox containment. The public event timeline is not a cryptographically signed audit log.
+
+Public demo uses in-memory tasks, lost on restart. Keep `AB_DEMO_PASSWORD` and `AB_AUDIT_KEY` configured on Render; avoid exposing them. See `PUBLIC_DEMO_DEPLOY.md`.
+
+---
+
 > **Free-hosted showcase notice:** The `render.yaml` configuration runs `LOCAL_FIXTURE_MODE=1` with sample planning only. It does not run live Vultr AI or a real Docker sandbox; see [START_HERE_UPLOAD.md](START_HERE_UPLOAD.md).
 
 # AgentBoundary AI — Vultr Agent Rush Edition

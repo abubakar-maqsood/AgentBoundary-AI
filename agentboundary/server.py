@@ -1,4 +1,6 @@
-import os, re, secrets, threading
+import os, re, secrets, threading, time, uuid
+from collections import deque
+from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from fastapi import FastAPI, HTTPException, Request, Depends
 from fastapi.responses import HTMLResponse
@@ -35,7 +37,7 @@ async def auth(request:Request, creds:HTTPBasicCredentials|None=Depends(security
         public=os.environ.get('AB_PUBLIC_ORIGIN','').rstrip('/')
         if origin and public and origin.rstrip('/')!=public:raise HTTPException(403,'Origin mismatch')
 
-@app.get('/',response_class=HTMLResponse)
+@app.get('/admin',response_class=HTMLResponse)
 async def homepage(_:None=Depends(auth)):
     return (BASE/'ui.html').read_text(encoding='utf-8')
 
@@ -119,3 +121,123 @@ def containment(body:ContainmentRequest,_:None=Depends(auth)):
         store.log('CONTAINMENT', 'CONTAINMENT_TEST',f"{body.scenario}; exit={result['exit_code']}; timed_out={result['timed_out']}; sha256={result['stdout_sha256']}")
         return {'scenario':body.scenario,'result':result,'actual_execution':True}
     finally:lock.release()
+
+
+# --- PUBLIC SHOWCASE (separate from the authenticated execution gateway) ---
+# No AI inference, Docker access, shared SQLite writes, or administrative APIs.
+# This environment is intentionally an ephemeral, synthetic-data demonstration.
+public_demo_lock = threading.RLock()
+public_demo_tasks = {}
+public_demo_hits = {}
+PUBLIC_MAX_TASKS = 200
+PUBLIC_TTL = 20 * 60
+
+
+def _public_limit(request: Request):
+    # Simple in-process abuse guard. Use a reverse-proxy rate limiter for production.
+    ip = request.client.host if request.client else 'unknown'
+    now = time.monotonic()
+    with public_demo_lock:
+        hits = public_demo_hits.setdefault(ip, deque())
+        while hits and hits[0] < now - 60:
+            hits.popleft()
+        if len(hits) >= 50:
+            raise HTTPException(429, 'Public demo rate limit reached. Try again in a minute.')
+        hits.append(now)
+        if len(public_demo_hits) > 2000:
+            public_demo_hits.clear()
+
+
+def _public_clean():
+    now = time.time()
+    expired = [k for k, t in public_demo_tasks.items() if t['_created_ts'] + PUBLIC_TTL < now]
+    for k in expired:
+        del public_demo_tasks[k]
+    if len(public_demo_tasks) >= PUBLIC_MAX_TASKS:
+        oldest = min(public_demo_tasks, key=lambda k: public_demo_tasks[k]['_created_ts'])
+        del public_demo_tasks[oldest]
+
+
+def _public_view(t):
+    return {k: v for k, v in t.items() if not k.startswith('_') and k not in ('events', 'goal')}
+
+
+def _public_event(t, event, detail):
+    t['events'].append({'event':event,'detail':detail,'timestamp':datetime.now(timezone.utc).isoformat()})
+
+
+@app.get('/public', response_class=HTMLResponse)
+@app.get('/', response_class=HTMLResponse)
+async def public_homepage():
+    return (BASE/'public_demo.html').read_text(encoding='utf-8')
+
+
+@app.get('/api/public/status')
+async def public_status():
+    return {'status':'ok','mode':'fixture','public_demo':True,'sandbox_available':False}
+
+
+@app.post('/api/public/tasks')
+async def public_create(body: Goal, request: Request):
+    _public_limit(request)
+    from .inference import fixture_plan
+    with public_demo_lock:
+        _public_clean()
+        now = datetime.now(timezone.utc)
+        task = {'id':str(uuid.uuid4()),'created_at':now.isoformat(),
+                'expires_at':(now+timedelta(seconds=PUBLIC_TTL)).isoformat(),
+                'step_index':0,'max_steps':2,'revoked':0,'state':'ready',
+                'steps':[{'name':s['name'],'reason':s['reason']} for s in fixture_plan(body.goal)],
+                '_created_ts':time.time(),'events':[]}
+        _public_event(task,'TASK_CREATED','Public demo task created using synthetic sample data')
+        _public_event(task,'PLAN_READY','Two predefined steps; no AI inference or code execution')
+        public_demo_tasks[task['id']]=task
+        return {'task':_public_view(task),'inference_model':'PUBLIC FIXTURE (not AI)'}
+
+
+@app.get('/api/public/tasks/{task_id}')
+async def public_read(task_id:uuid.UUID, request:Request):
+    _public_limit(request)
+    with public_demo_lock:
+        _public_clean()
+        t=public_demo_tasks.get(str(task_id))
+        if not t: raise HTTPException(404, 'Public demo task not found or expired')
+        return {'task':_public_view(t),'events':list(t['events']),
+                'audit_integrity':None,'note':'Ephemeral demo timeline; not signed audit evidence'}
+
+
+@app.post('/api/public/tasks/{task_id}/revoke')
+async def public_revoke(task_id:uuid.UUID, request:Request):
+    _public_limit(request)
+    with public_demo_lock:
+        _public_clean()
+        t=public_demo_tasks.get(str(task_id))
+        if not t: raise HTTPException(404, 'Public demo task not found or expired')
+        if not t['revoked']:
+            t['revoked']=1;t['state']='revoked'
+            _public_event(t,'PERMISSION_REVOKED','Public demo permission revoked; future steps denied')
+        return {'status':'revoked','mode':'public_fixture'}
+
+
+@app.post('/api/public/tasks/{task_id}/execute-next')
+async def public_try_execution(task_id:uuid.UUID, request:Request):
+    _public_limit(request)
+    with public_demo_lock:
+        _public_clean()
+        t=public_demo_tasks.get(str(task_id))
+        if not t: raise HTTPException(404, 'Public demo task not found or expired')
+        why=('Permission revoked' if t['revoked'] else 'No sandbox configured in public fixture demo')
+        _public_event(t,'POLICY_DENIED',why+'; no code executed')
+        return {'decision':'BLOCK','reason':why,'executed':False,'simulation':True}
+
+
+@app.get('/api/public/audit/verify')
+async def public_audit_status():
+    return {'integrity':None,'mode':'ephemeral_demo','message':'Public demo records are not signed audit logs'}
+
+
+@app.post('/api/public/containment')
+async def public_containment(request:Request):
+    _public_limit(request)
+    raise HTTPException(503, 'Public demo does not execute containment tests. Linux Docker is required.')
+
