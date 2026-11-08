@@ -1,4 +1,4 @@
-## Public showcase + protected admin (new)
+## Public showcase + protected admin 
 
 - `/` and `/public`: **No-login public demo** with predefined synthetic steps, permission revocation, and ephemeral per-task event timeline.
 - `/admin`: **Password-protected original dashboard**, using `AB_DEMO_USER` and `AB_DEMO_PASSWORD`.
