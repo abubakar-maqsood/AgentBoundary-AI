@@ -1,0 +1,10 @@
+YOUR_DOMAIN {
+    encode zstd gzip
+    reverse_proxy 127.0.0.1:8765
+    header {
+        X-Content-Type-Options nosniff
+        Referrer-Policy no-referrer
+        Strict-Transport-Security "max-age=31536000"
+        Content-Security-Policy "default-src 'self'; script-src 'unsafe-inline' 'self'; style-src 'unsafe-inline' 'self'; object-src 'none'; frame-ancestors 'none'; base-uri 'none'"
+    }
+}

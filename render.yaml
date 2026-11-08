@@ -1,0 +1,19 @@
+services:
+  - type: web
+    name: agentboundary-ai-demo
+    runtime: python
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn agentboundary.server:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /healthz
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.12.10
+      - key: LOCAL_FIXTURE_MODE
+        value: "1"
+      - key: AB_DEMO_USER
+        value: judge
+      - key: AB_DEMO_PASSWORD
+        sync: false
+      - key: AB_AUDIT_KEY
+        generateValue: true
